@@ -6,6 +6,8 @@ template<typename T>
 class Parser;
 template<typename T>
 class SymbolError;
+template<typename T>
+class SymbolNum;
 
 // Precedence ranks which can also serve as identifiers
 enum precedence_list
@@ -26,32 +28,30 @@ template<typename T>
 class Symbol
 {
 public:
-	virtual int GetType() { return sym_num; }
-	virtual std::string GetToken() { return ""; }
+	virtual int GetPrecedence() = 0;
+	virtual std::string GetToken() = 0;
 	virtual bool IsLeftAssoc() { return true; }
-
 	virtual bool IsDyad() { return false; }
 	virtual bool IsMonad() { return false; }
 
-	Symbol() { parent = nullptr; };
-	Symbol(T v) : val(v) {};
+	Symbol() {};
+	Symbol(Parser<T>* par) : parent(par) {};
 
-	virtual Symbol<T>* eval() { return this; }
-	virtual T getVal() { return val; }
+	virtual  SymbolNum<T>* eval() { return new SymbolError<T>; }
+	virtual void SetVal(T v) {};
 	void SetParent(Parser<T>* p) { parent = p; }
 
 	bool leftAssoc = true;
 protected:
-	T val = 0;
+	//T val = 0;
 	Parser<T>* parent = nullptr;
 };
 
 template<typename T>
 class Dyad : public Symbol<T>
 {
-public:
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2) = 0;
-	virtual Symbol<T>* eval()
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2) = 0;
+	virtual SymbolNum<T>* eval()
 	{
 		try
 		{
@@ -63,7 +63,7 @@ public:
 			std::cout << "Error: Mismatched operations\n";
 			return new SymbolError<T>;
 		}
-		Symbol<T>* s1 = (*(--this->parent->itr))->eval();
+		SymbolNum<T>* s1 = (*(--this->parent->itr))->eval();
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
@@ -74,9 +74,9 @@ public:
 			std::cout << "Error: Mismatched operations\n";
 			return new SymbolError<T>;
 		}
-		Symbol<T>* s2 = (*(--this->parent->itr))->eval();
-		return eval(s1, s2);
-		//return eval((*(--this->parent->i))->eval(),
+		SymbolNum<T>* s2 = (*(--this->parent->itr))->eval();
+		return Apply(s1, s2);
+		//return Apply((*(--this->parent->i))->Apply(),
 		//(*(--this->parent->i))->eval());
 	}
 	bool IsDyad() { return true; }
@@ -85,8 +85,8 @@ public:
 template<typename T>
 class Monad : public Symbol<T>
 {
-	virtual Symbol<T>* eval(Symbol<T>* t1) = 0;
-	virtual Symbol<T>* eval()
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) = 0;
+	virtual SymbolNum<T>* eval()
 	{
 		try
 		{
@@ -98,7 +98,7 @@ class Monad : public Symbol<T>
 			std::cout << "Error: Mismatched operations\n";
 			return new SymbolError<T>;
 		}
-		return eval((*(--this->parent->itr))->eval());
+		return Apply((*(--this->parent->itr))->eval());
 	}
 	bool IsMonad() { return true; }
 };
@@ -107,103 +107,128 @@ class Monad : public Symbol<T>
 template<typename T>
 class SymbolLParen : public Symbol<T>
 {
-	virtual int GetType() { return sym_lparen; }
+public:
+	virtual int GetPrecedence() { return sym_lparen; }
 	virtual std::string GetToken() { return "("; }
-	virtual Symbol<T>* eval(Symbol<T>* t1) { return t1; }
+	//virtual  SymbolNum<T>* Apply(Symbol<T>* t1) { return t1; }
 };
 
 // Used for parsing strings. Should never make it to the output queue
 template<typename T>
 class SymbolRParen : public Symbol<T>
 {
-	virtual int GetType() { return sym_rparen; }
+public:
+	virtual int GetPrecedence() { return sym_rparen; }
 	virtual std::string GetToken() { return ")"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1) { return t1; }
+};
+
+// Used for intermediate calculations and parsed numbers
+template<typename T>
+class SymbolNum : public Symbol<T>
+{
+public:
+	SymbolNum() : Symbol<T>() {}
+	SymbolNum(T v) : val(v) {}
+
+	virtual int GetPrecedence() { return sym_num; }
+	virtual std::string GetToken() { return ""; }
+	virtual T getVal() { return val; }
+	virtual void SetVal(T v) { val = v; }
+	virtual  SymbolNum<T>* eval() { return this; }
+protected:
+	T val;
 };
 
 template<typename T>
-class SymbolConst : public Symbol<T>
+class SymbolVar : public SymbolNum<T>
 {
 public:
 	std::string name;
-	SymbolConst(T v, std::string s) : name(s), Symbol<T>(v) {}
-private:
+	SymbolVar(std::string s, T v) : name(s), SymbolNum<T>(v) {}
+	virtual int GetPrecedence() { return sym_num; }
 	virtual std::string GetToken() { return name; }
-	virtual Symbol<T>* eval(Symbol<T>* t1) { return t1; }
+	virtual void SetVal(T v) { this->val = v; }
 };
 
 template<typename T>
-class SymbolError : public Symbol<T>
+class SymbolError : public SymbolNum<T>
 {
+public:
+	SymbolError() {};
+	virtual int GetPrecedence() { return -100; }
 	virtual std::string GetToken() { return "error"; }
-	//virtual Symbol<T>* eval(Symbol<T>* t1) { return t1; }
-	//virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2) { return t1; }
 };
 
 template<typename T>
 class SymbolAdd : public Dyad<T>
 {
-	virtual int GetType() { return sym_add; }
+public:
+	virtual int GetPrecedence() { return sym_add; }
 	virtual std::string GetToken() { return "+"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(t2->getVal() + t1->getVal());
+		return new SymbolNum<T>(t2->getVal() + t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolSub : public Dyad<T>
 {
-	virtual int GetType() { return sym_sub; }
+public:
+	virtual int GetPrecedence() { return sym_sub; }
 	virtual std::string GetToken() { return "-"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(t2->getVal() - t1->getVal());
+		return new SymbolNum<T>(t2->getVal() - t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolMul : public Dyad<T>
 {
-	virtual int GetType() { return sym_mul; }
+public:
+	virtual int GetPrecedence() { return sym_mul; }
 	virtual std::string GetToken() { return "*"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(t2->getVal() * t1->getVal());
+		return new SymbolNum<T>(t2->getVal() * t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolDiv : public Dyad<T>
 {
-	virtual int GetType() { return sym_div; }
+public:
+	virtual int GetPrecedence() { return sym_div; }
 	virtual std::string GetToken() { return "/"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(t2->getVal() / t1->getVal());
+		return new SymbolNum<T>(t2->getVal() / t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolPow : public Dyad<T>
 {
-	virtual int GetType() { return sym_pow; }
+public:
+	virtual int GetPrecedence() { return sym_pow; }
 	virtual bool IsLeftAssoc() { return false; }
 	virtual std::string GetToken() { return "^"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(pow(t2->getVal(), t1->getVal()));
+		return new SymbolNum<T>(pow(t2->getVal(), t1->getVal()));
 	}
 };
 
 template<typename T>
 class SymbolNeg : public Monad<T>
 {
-	virtual int GetType() { return sym_neg; }
+public:
+	virtual int GetPrecedence() { return sym_neg; }
 	virtual std::string GetToken() { return "~"; }
-	virtual Symbol<T>* eval(Symbol<T>* t1)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
 	{
-		return new Symbol<T>(-t1->getVal());
+		return new SymbolNum<T>(-t1->getVal());
 	}
 };
 
@@ -213,15 +238,16 @@ class SymbolFunc2 : public Dyad<T>
 public:
 	SymbolFunc2() {};
 	SymbolFunc2(std::function<T(T, T)> g, std::string s) : f(g), name(s) {};
-	std::string name = "f";
-	std::function<T(T, T)> f = [&](T, T) { return this->val; };
-private:
-	virtual int GetType() { return sym_func; }
+
+	std::function<T(T, T)> f = [&](T, T) { return 0; };
+	virtual int GetPrecedence() { return sym_func; }
 	virtual std::string GetToken() { return name; }
-	virtual Symbol<T>* eval(Symbol<T>* t1, Symbol<T>* t2)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
 	{
-		return new Symbol<T>(f(t2->getVal(), t1->getVal()));
+		return new SymbolNum<T>(f(t2->getVal(), t1->getVal()));
 	}
+private:
+	std::string name = "f";
 };
 
 template<typename T>
@@ -230,29 +256,16 @@ class SymbolFunc1 : public Monad<T>
 public:
 	SymbolFunc1() {};
 	SymbolFunc1(std::function<T(T)> g, std::string s) : f(g), name(s) {};
-	std::string name = "f";
-	std::function<T(T)> f = [&](T) { return this->val; };
-private:
-	virtual int GetType() { return sym_func; }
+	std::function<T(T)> f = [&](T) { return 0; };
+	virtual int GetPrecedence() { return sym_func; }
 	virtual std::string GetToken() { return name; }
-	virtual Symbol<T>* eval(Symbol<T>* t1)
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
 	{
-		return new Symbol<T>(f(t1->getVal()));
+		return new SymbolNum<T>(f(t1->getVal()));
 	}
+private:
+	std::string name = "f";
 };
-
-// Intended for use with std::complex<U>.
-//template<typename T>
-//class Symbol_i : public Monad<T>
-//{
-//	virtual int GetType() { return sym_mul; }
-//	virtual std::string GetToken() { return "i"; }
-//	T val = T(0, 1);
-//	virtual Symbol<T>* eval(Symbol<T>* t1)
-//	{
-//		return new Symbol<T>(t1->getVal() * T(0, 1));
-//	}
-//};
 
 //#define TypedefTokens(T)      \
 //typedef Symbol<T> Num;        \

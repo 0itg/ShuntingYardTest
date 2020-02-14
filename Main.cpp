@@ -9,10 +9,11 @@
 int main()
 {
 	using namespace std::complex_literals;
-	std::string expr = "f(3.14159 / 4) + i*f(3.14159 / 3)";
+	std::string expr1 = "f(3.14159 / 4) + i*f(3.14159 / 3)";
 	std::string expr2 = "i*(2 + i5)^2";
 	std::string expr3 = "(((g(PI, i*f(PI/4)^2))))";
 	std::string expr4 = "1+2)*(1+2*(4+5 + 3";
+	std::string expr5 = "z^2+5zz+1";
 
 	typedef std::complex<double> T;
 	//typedef double T;
@@ -20,23 +21,25 @@ int main()
 	auto f = [](T z)->T { return sin(z); };
 	auto g = [](T z1, T z2)->T { return z1*z1 + z2*z2; };
 
-	Parser<T> P;
-	P.RecognizeToken(new SymbolConst<T>(T(0,1), "i"));
-	P.RecognizeToken(new SymbolFunc1<T>(f, "f"));
-	P.Parse(expr2);
-	P.eval();
-	P.Parse(expr);
-	Parser<T> Q;
-	Q.RecognizeToken(new SymbolConst<T>(T(0, 1), "i"));
-	Q.Parse(expr2);
 	Parser<T> R;
 	R.RecognizeToken(new SymbolFunc1<T>(f, "f"));
 	R.RecognizeToken(new SymbolFunc2<T>(g, "g"));
-	R.RecognizeToken(new SymbolConst<T>(T(0, 1), "i"));
-	R.RecognizeToken(new SymbolConst<T>(3.14159, "PI"));
+	R.RecognizeToken(new SymbolVar<T>("i", T(0, 1)));
+	R.RecognizeToken(new SymbolVar<T>("PI", 3.14159));
 	R.Parse(expr3);
-	std::cout << P.eval() << "\n" << Q.eval() << "\n" << R.eval() << "\n";
-	R.Parse(expr4);
-	std::cout << R.eval();
+	std::cout << R.Parse(expr1) << "\n" << R.Parse(expr2)
+		<< "\n" << R.Parse(expr3) << "\n" << R.Parse(expr4) << "\n";
+
+	R.Parse(expr5);
+	R.setVariable("z", 2);
+	R.setVariable("zz", T(0,1));
+	std::cout << R.eval() << "\n";
+	R.setVariable("z", T(3,1));
+	std::cout << R.eval() << "\n";
+
+	R.setVariable("a", 5);
+	R.setVariable("b", 7.1);
+	std::cout << R.Parse("a ^ 3 + b + g(z, a)") << "\n";
+	
 	return 0;
 }
