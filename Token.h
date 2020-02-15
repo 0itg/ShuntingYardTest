@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <complex>
+#include <array>
 
 template<typename T>
 class Parser;
@@ -78,6 +79,83 @@ public:
 		return Apply(s1, s2);
 	}
 	bool IsDyad() { return true; }
+};
+
+//template<typename T, class U>
+//class SymbolFunc : public Symbol<T>
+//{
+//public:
+//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) = 0;
+//	virtual SymbolNum<T>* eval()
+//	{
+//		try
+//		{
+//			if (this->parent->itr < this->parent->GetMinItr() + 1)
+//				throw std::invalid_argument("Error: Mismatched operations\n");
+//		}
+//		catch (std::invalid_argument)
+//		{
+//			throw;
+//		}
+//		return Apply((*(--this->parent->itr))->eval());
+//	}
+//};
+
+template<int... Is>
+struct seq {};
+template<int N, int... Is>
+struct int_seq : int_seq<N - 1, N - 1, Is...> {};
+template<int... Is>
+struct int_seq<0, Is...> : seq<Is...> {};
+
+template<typename T, typename... Ts, int... Is>
+T callByVector(std::function<T(Ts...)> f, std::array<T,
+	sizeof...(Ts)>& arguments, seq<Is...>)
+{
+	return f(arguments[Is]...);
+}
+
+template<typename T, typename... Ts>
+T callByVector(std::function<T(Ts...)> f,
+	std::array<T, sizeof...(Ts)>& arguments)
+{
+	return callByVector(f, arguments, int_seq<sizeof...(Ts)>());
+}
+
+template<typename T, typename... Ts>
+class SymbolFunc : public Symbol<T>
+{
+public:
+	SymbolFunc() {};
+	SymbolFunc(std::function<T(Ts...)> g, std::string s) : f(g), name(s) {};
+
+	std::function <T(Ts...)> f;
+	virtual SymbolNum<T>* Apply(std::array<T, sizeof...(Ts)> args)
+	{
+		return new SymbolNum<T>(callByVector(f, args));
+	}
+	virtual SymbolNum<T>* eval()
+	{
+		std::array<T, sizeof...(Ts)> s;
+		for (size_t i = 0; i < sizeof...(Ts); i++)
+		{
+			try
+			{
+				if (this->parent->itr < this->parent->GetMinItr() + 1)
+					throw std::invalid_argument("Error: Mismatched operations\n");
+			}
+			catch (std::invalid_argument)
+			{
+				throw;
+			}
+			s[i] = (*(--this->parent->itr))->eval()->getVal();
+		}
+		return Apply(s);
+	}
+	virtual int GetPrecedence() { return sym_func; }
+	virtual std::string GetToken() { return name; }
+private:
+	std::string name = "f";	
 };
 
 template<typename T>
@@ -240,40 +318,40 @@ public:
 	}
 };
 
-template<typename T>
-class SymbolFunc2 : public Dyad<T> 
-{
-public:
-	SymbolFunc2() {};
-	SymbolFunc2(std::function<T(T, T)> g, std::string s) : f(g), name(s) {};
-
-	std::function<T(T, T)> f = [&](T, T) { return 0; };
-	virtual int GetPrecedence() { return sym_func; }
-	virtual std::string GetToken() { return name; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
-	{
-		return new SymbolNum<T>(f(t2->getVal(), t1->getVal()));
-	}
-private:
-	std::string name = "f";
-};
-
-template<typename T>
-class SymbolFunc1 : public Monad<T>
-{
-public:
-	SymbolFunc1() {};
-	SymbolFunc1(std::function<T(T)> g, std::string s) : f(g), name(s) {};
-	std::function<T(T)> f = [&](T) { return 0; };
-	virtual int GetPrecedence() { return sym_func; }
-	virtual std::string GetToken() { return name; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
-	{
-		return new SymbolNum<T>(f(t1->getVal()));
-	}
-private:
-	std::string name = "f";
-};
+//template<typename T>
+//class SymbolFunc2 : public Dyad<T> 
+//{
+//public:
+//	SymbolFunc2() {};
+//	SymbolFunc2(std::function<T(T, T)> g, std::string s) : f(g), name(s) {};
+//
+//	std::function<T(T, T)> f = [&](T, T) { return 0; };
+//	virtual int GetPrecedence() { return sym_func; }
+//	virtual std::string GetToken() { return name; }
+//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+//	{
+//		return new SymbolNum<T>(f(t2->getVal(), t1->getVal()));
+//	}
+//private:
+//	std::string name = "f";
+//};
+//
+//template<typename T>
+//class SymbolFunc1 : public Monad<T>
+//{
+//public:
+//	SymbolFunc1() {};
+//	SymbolFunc1(std::function<T(T)> g, std::string s) : f(g), name(s) {};
+//	std::function<T(T)> f = [&](T) { return 0; };
+//	virtual int GetPrecedence() { return sym_func; }
+//	virtual std::string GetToken() { return name; }
+//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
+//	{
+//		return new SymbolNum<T>(f(t1->getVal()));
+//	}
+//private:
+//	std::string name = "f";
+//};
 
 //#define TypedefTokens(T)      \
 //typedef Symbol<T> Num;        \

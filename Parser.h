@@ -24,6 +24,11 @@ public:
 		itr = out.end() - 1;
 		return (*itr)->eval()->getVal();
 	};
+	template<typename... Ts>
+	void RecognizeFunction(std::function<T(Ts...)> f, std::string name)
+	{
+		RecognizeToken(new SymbolFunc<T, Ts...>(f, name));
+	}
 	void setVariable(std::string name, T val);
 	T Parse(std::string str);
 	typename std::vector<Symbol<T>*>::iterator itr;
@@ -55,8 +60,6 @@ inline Parser<T>::Parser()
 	RecognizeToken(new SymbolDiv<T>);
 	RecognizeToken(new SymbolPow<T>);
 	RecognizeToken(new SymbolNeg<T>);
-	RecognizeToken(new SymbolFunc1<T>);
-	RecognizeToken(new SymbolFunc2<T>);
 	RecognizeToken(new SymbolLParen<T>);
 	RecognizeToken(new SymbolRParen<T>);
 	RecognizeToken(new SymbolComma<T>);
