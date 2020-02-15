@@ -30,7 +30,7 @@ int main()
 	std::cout << R.Parse(expr1) << "\n" << R.Parse(expr2)
 		<< "\n" << R.Parse(expr3) << "\n" << R.Parse(expr4) << "\n";
 
-	R.Parse(expr5);
+		R.Parse(expr5);
 	R.setVariable("z", 2);
 	R.setVariable("zz", T(0,1));
 	std::cout << R.eval() << "\n";
@@ -39,7 +39,14 @@ int main()
 
 	R.setVariable("a", 5);
 	R.setVariable("b", 7.1);
-	std::cout << R.Parse("a ^ 3 + b + g(z, a)") << "\n";
-	
+	try
+	{
+	std::cout << R.Parse("a ^ 3 + b^(-1) + g(-z, -a)") << "\n";
+	std::cout << R.Parse("b^-1)") << "\n";
+	}
+	catch (std::invalid_argument msg)
+	{
+		std::cout << msg.what();
+	}
 	return 0;
 }

@@ -1,7 +1,6 @@
 #pragma once
 #include "Token.h"
 
-#include <stack>
 #include <map>
 #include <sstream>
 
@@ -28,7 +27,6 @@ public:
 	void setVariable(std::string name, T val);
 	T Parse(std::string str);
 	typename std::vector<Symbol<T>*>::iterator itr;
-
 
 	auto GetMinItr() { return out.begin(); }
 private:
@@ -61,6 +59,7 @@ inline Parser<T>::Parser()
 	RecognizeToken(new SymbolFunc2<T>);
 	RecognizeToken(new SymbolLParen<T>);
 	RecognizeToken(new SymbolRParen<T>);
+	RecognizeToken(new SymbolComma<T>);
 }
 
 template<typename T>
@@ -107,7 +106,7 @@ T Parser<T>::Parse(std::string input)
 		replaceAll(input, tok.first, " " + tok.first + " ");
 	}
 
-	replaceAll(input, ",", "");
+	//replaceAll(input, ",", "");
 
 	std::string s;
 	std::stringstream strPre(input);
@@ -159,7 +158,9 @@ T Parser<T>::Parse(std::string input)
 		{
 			if (i > 0)
 			{
-				if (!tokens[tokenVec[i - 1]]->IsMonad())
+				if ((!tokens[tokenVec[i - 1]]->IsMonad() ||
+					tokenVec[i - 1] == ",") &&
+					tokens[tokenVec[i - 1]]->IsLeftAssoc())
 				{
 					tokenVec[i] = "~";
 				}
@@ -198,7 +199,8 @@ T Parser<T>::Parse(std::string input)
 	{
 		if (tokens[tokenVec[0]]->IsDyad() || tokens[tokenVec.back()]->IsDyad())
 		{
-			throw std::string("Error: Expression begins or ends with dyad");
+			throw std::invalid_argument(
+				"Error: Expression begins or ends with dyad");
 		}
 		for (auto it = tokenVec.begin() + 1; it != tokenVec.end() - 1; it++)
 		{
@@ -209,7 +211,8 @@ T Parser<T>::Parse(std::string input)
 					if (tokens[*(it - 1)]->IsDyad() ||
 						tokens[*(it + 1)]->IsDyad())
 					{
-						throw std::string("Error: Two adjacent dyads");
+						throw std::invalid_argument(
+							"Error: Two adjacent dyads");
 					}
 				}
 			}
@@ -218,6 +221,7 @@ T Parser<T>::Parse(std::string input)
 	catch (std::string msg)
 	{
 		std::cout << msg << "\n";
+		throw msg;
 	}
 
 	for (auto s : tokenVec)
@@ -250,13 +254,13 @@ T Parser<T>::Parse(std::string input)
 					{
 						if (opStack.empty())
 						{
-							throw "x";
+							throw std::invalid_argument("Warning: Mismatched parentheses. Attempting to fix.\n");
 						}
 					}
-					catch (...)
+					catch (std::invalid_argument msg)
 					{
 						PushOp(tokens["("]);
-						std::cout << "Warning: Mismatched parentheses. Attempting to fix.\n";
+						std::cout << msg.what();
 					}
 				}
 				opStack.pop_back();
@@ -281,7 +285,7 @@ T Parser<T>::Parse(std::string input)
 	while (opStack.size() > 0)
 	{
 		out.push_back(opStack.back());
-		if (out.back()->GetPrecedence() == -1) out.pop_back();
+		if (out.back()->GetPrecedence() == sym_lparen) out.pop_back();
 		opStack.pop_back();
 	}
 

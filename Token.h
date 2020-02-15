@@ -22,6 +22,7 @@ enum precedence_list
 	sym_sub  = 4,
 	sym_lparen = -1,
 	sym_rparen = 100,
+	sym_comma = -1
 };
 
 template<typename T>
@@ -50,34 +51,31 @@ protected:
 template<typename T>
 class Dyad : public Symbol<T>
 {
+public:
 	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2) = 0;
 	virtual SymbolNum<T>* eval()
 	{
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw "error";
+				throw std::invalid_argument("Error: Mismatched operations\n");
 		}
-		catch(...)
+		catch(std::invalid_argument)
 		{
-			std::cout << "Error: Mismatched operations\n";
-			return new SymbolError<T>;
+			throw;
 		}
 		SymbolNum<T>* s1 = (*(--this->parent->itr))->eval();
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw "error";
+				throw std::invalid_argument("Error: Mismatched operations\n");
 		}
-		catch (...)
+		catch (std::invalid_argument)
 		{
-			std::cout << "Error: Mismatched operations\n";
-			return new SymbolError<T>;
+			throw;
 		}
 		SymbolNum<T>* s2 = (*(--this->parent->itr))->eval();
 		return Apply(s1, s2);
-		//return Apply((*(--this->parent->i))->Apply(),
-		//(*(--this->parent->i))->eval());
 	}
 	bool IsDyad() { return true; }
 };
@@ -85,18 +83,18 @@ class Dyad : public Symbol<T>
 template<typename T>
 class Monad : public Symbol<T>
 {
+public:
 	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) = 0;
 	virtual SymbolNum<T>* eval()
 	{
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw "error3";
+				throw std::invalid_argument("Error: Mismatched operations\n");
 		}
-		catch (...)
+		catch (std::invalid_argument)
 		{
-			std::cout << "Error: Mismatched operations\n";
-			return new SymbolError<T>;
+			throw;
 		}
 		return Apply((*(--this->parent->itr))->eval());
 	}
@@ -133,7 +131,7 @@ public:
 	virtual int GetPrecedence() { return sym_num; }
 	virtual std::string GetToken() { return ""; }
 	virtual T getVal() { return val; }
-	virtual void SetVal(T v) { val = v; }
+	virtual void SetVal(T v) { }
 	virtual  SymbolNum<T>* eval() { return this; }
 protected:
 	T val;
@@ -148,6 +146,16 @@ public:
 	virtual int GetPrecedence() { return sym_num; }
 	virtual std::string GetToken() { return name; }
 	virtual void SetVal(T v) { this->val = v; }
+};
+
+template<typename T>
+class SymbolComma : public Monad<T>
+{
+public:
+	SymbolComma() {};
+	virtual int GetPrecedence() { return sym_comma; }
+	virtual std::string GetToken() { return ","; }
+	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) { return this->eval(); }
 };
 
 template<typename T>
