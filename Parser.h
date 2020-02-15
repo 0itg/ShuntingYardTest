@@ -1,12 +1,13 @@
 #pragma once
 #include "Token.h"
 
-#include <stack>
 #include <map>
 #include <sstream>
 
 template<typename T>
 class Symbol;
+
+struct cmp_length_then_alpha;
 
 template<typename T>
 class Parser
@@ -23,8 +24,15 @@ public:
 		itr = out.end() - 1;
 		return (*itr)->eval()->getVal();
 	};
-	void Parse(std::string str);
+	template<typename... Ts>
+	void RecognizeFunction(std::function<T(Ts...)> f, std::string name)
+	{
+		RecognizeToken(new SymbolFunc<T, Ts...>(f, name));
+	}
+	void setVariable(std::string name, T val);
+	T Parse(std::string str);
 	typename std::vector<Symbol<T>*>::iterator itr;
+
 	auto GetMinItr() { return out.begin(); }
 private:
 	void PushToken(Symbol<T>* token)
@@ -36,7 +44,10 @@ private:
 	{
 		out.pop_back();
 	}
-	std::map<std::string, Symbol<T>*> tokens;
+	// Custom comparator puts longest tokens first. When tokenizing the input,
+	// replacing the longest ones first prevents them being damaged when
+	// they contain shorter tokens.
+	std::map<std::string, Symbol<T>*, cmp_length_then_alpha> tokens;
 	std::vector<Symbol<T>*> out;
 };
 
@@ -49,14 +60,23 @@ inline Parser<T>::Parser()
 	RecognizeToken(new SymbolDiv<T>);
 	RecognizeToken(new SymbolPow<T>);
 	RecognizeToken(new SymbolNeg<T>);
-	RecognizeToken(new SymbolFunc1<T>);
-	RecognizeToken(new SymbolFunc2<T>);
 	RecognizeToken(new SymbolLParen<T>);
 	RecognizeToken(new SymbolRParen<T>);
+	RecognizeToken(new SymbolComma<T>);
 }
 
 template<typename T>
-void Parser<T>::Parse(std::string input)
+inline void Parser<T>::setVariable(std::string name, T val)
+{
+	if (tokens.find(name) == tokens.end())
+	{
+		tokens[name] = new SymbolVar<T>(name, val);
+	}
+	else tokens[name]->SetVal(val);
+}
+
+template<typename T>
+T Parser<T>::Parse(std::string input)
 {
 	std::vector<Symbol<T>*> opStack;
 	out.clear();
@@ -89,6 +109,7 @@ void Parser<T>::Parse(std::string input)
 		replaceAll(input, tok.first, " " + tok.first + " ");
 	}
 
+	//replaceAll(input, ",", "");
 
 	std::string s;
 	std::stringstream strPre(input);
@@ -103,17 +124,33 @@ void Parser<T>::Parse(std::string input)
 		T t;
 		std::string name;
 		std::stringstream ss(s);
+		// If first char is a number, read in the whole number.
+		// If anything remains, It is an unrecognized token, 
+		// so call it a variable and set it to zero.
 		if (isdigit(s[0]))
 		{
 			ss >> t;
-			tokens[s] = new SymbolConst<T>(t, s);
+			// Add "\\" to name to prevent issues tokenizing in the future
+			// if the parser is reused without clearing mapped tokens.
+			s = "\\" + s;
+			tokens[s] = new SymbolNum<T>(t);
+			tokenVec.push_back(s);
+			if (ss >> s)
+			{
+				if (tokens.find(s) == tokens.end())
+				{
+					tokens[s] = new SymbolVar<T>(s, 0);
+					tokenVec.push_back(s);
+				}
+				else tokenVec.push_back(s);
+			}
 		}
 		else if (tokens.find(s) == tokens.end())
 		{
-			tokens[s] = new SymbolConst<T>(t, s);
+			tokens[s] = new SymbolVar<T>(s, 0);
+			tokenVec.push_back(s);
 		}
-		if (s == ",") strPre >> s;
-		tokenVec.push_back(s);
+		else tokenVec.push_back(s);
 	}
 
 	for (size_t i = 0; i < tokenVec.size(); i++)
@@ -124,7 +161,9 @@ void Parser<T>::Parse(std::string input)
 		{
 			if (i > 0)
 			{
-				if (!tokens[tokenVec[i - 1]]->IsMonad())
+				if ((!tokens[tokenVec[i - 1]]->IsMonad() ||
+					tokenVec[i - 1] == ",") &&
+					tokens[tokenVec[i - 1]]->IsLeftAssoc())
 				{
 					tokenVec[i] = "~";
 				}
@@ -137,12 +176,12 @@ void Parser<T>::Parse(std::string input)
 
 		// Special rule: implied multiplication between constants and numbers,
 		// e.g. 3i, 2PI.
-		if (tokens[tokenVec[i]]->GetType() == sym_num)
+		if (tokens[tokenVec[i]]->GetPrecedence() == sym_num)
 		{
 			int inserted = 0;
 			if (i > 0)
 			{
-				if  (isdigit(tokenVec[i - 1][0]))
+				if  (tokenVec[i - 1][0] == '\\')
 				{
 					tokenVec.insert(tokenVec.begin() + i, "*");
 					inserted++;
@@ -150,7 +189,7 @@ void Parser<T>::Parse(std::string input)
 			}
 			if (i < tokenVec.size() - 1)
 			{
-				if  (isdigit(tokenVec[i + 1][0]))
+				if  (tokenVec[i + 1][0] == '\\')
 				{
 					tokenVec.insert(tokenVec.begin() + i + 1 + inserted, "*");
 				}
@@ -163,18 +202,20 @@ void Parser<T>::Parse(std::string input)
 	{
 		if (tokens[tokenVec[0]]->IsDyad() || tokens[tokenVec.back()]->IsDyad())
 		{
-			throw std::string("Error: Expression begins or ends with dyad");
+			throw std::invalid_argument(
+				"Error: Expression begins or ends with dyad");
 		}
 		for (auto it = tokenVec.begin() + 1; it != tokenVec.end() - 1; it++)
 		{
-			if (!isdigit((*it)[0]))
+			if ((*it)[0] == '\\')
 			{
 				if (tokens[*it]->IsDyad())
 				{
 					if (tokens[*(it - 1)]->IsDyad() ||
 						tokens[*(it + 1)]->IsDyad())
 					{
-						throw std::string("Error: Two adjacent dyads");
+						throw std::invalid_argument(
+							"Error: Two adjacent dyads");
 					}
 				}
 			}
@@ -183,6 +224,7 @@ void Parser<T>::Parse(std::string input)
 	catch (std::string msg)
 	{
 		std::cout << msg << "\n";
+		throw msg;
 	}
 
 	for (auto s : tokenVec)
@@ -192,22 +234,22 @@ void Parser<T>::Parse(std::string input)
 		s1 >> op;
 
 		// Lower precedence means earlier in the order of operations
-		int tokPrec = tokens[op]->GetType();
+		int tokPrec = tokens[op]->GetPrecedence();
 
 		// First op always goes to the op stack. Left paren is given lowest
 		// precedence, so it is always added.
-		if (opStack.empty() || tokPrec < opStack.back()->GetType() ||
+		if (opStack.empty() || tokPrec < opStack.back()->GetPrecedence() ||
 				(!tokens[op]->IsLeftAssoc() &&
-					tokPrec == opStack.back()->GetType()))
+					tokPrec == opStack.back()->GetPrecedence()))
 			PushOp(tokens[op]);
-		else if (tokPrec >= opStack.back()->GetType())
+		else if (tokPrec >= opStack.back()->GetPrecedence())
 		{
 			// Right paren means, assuming it matches with a left, everything on the
 			// stack goes to the queue, because it all evaluates to an input for the
 			// next op.
 			if (tokPrec == sym_rparen)
 			{
-				while (opStack.back()->GetType() != sym_lparen)
+				while (opStack.back()->GetPrecedence() != sym_lparen)
 				{
 					out.push_back(opStack.back());
 					opStack.pop_back();
@@ -215,13 +257,13 @@ void Parser<T>::Parse(std::string input)
 					{
 						if (opStack.empty())
 						{
-							throw "x";
+							throw std::invalid_argument("Warning: Mismatched parentheses. Attempting to fix.\n");
 						}
 					}
-					catch (...)
+					catch (std::invalid_argument msg)
 					{
 						PushOp(tokens["("]);
-						std::cout << "Warning: Mismatched parentheses. Attempting to fix.\n";
+						std::cout << msg.what();
 					}
 				}
 				opStack.pop_back();
@@ -231,8 +273,8 @@ void Parser<T>::Parse(std::string input)
 			else
 			{
 				while (!opStack.empty() &&
-						opStack.back()->GetType() != sym_lparen && 
-						opStack.back()->GetType() <= tokPrec)
+						opStack.back()->GetPrecedence() != sym_lparen && 
+						opStack.back()->GetPrecedence() <= tokPrec)
 				{
 					out.push_back(opStack.back());
 					opStack.pop_back();
@@ -246,7 +288,18 @@ void Parser<T>::Parse(std::string input)
 	while (opStack.size() > 0)
 	{
 		out.push_back(opStack.back());
-		if (out.back()->GetType() == -1) out.pop_back();
+		if (out.back()->GetPrecedence() == sym_lparen) out.pop_back();
 		opStack.pop_back();
 	}
+
+	return eval();
 }
+
+struct cmp_length_then_alpha {
+	bool operator()(const std::string & a, const std::string & b) const {
+		if (a.length() != b.length())
+			return a.length() > b.length();
+		else
+			return a < b;
+	}
+};
