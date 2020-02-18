@@ -9,11 +9,11 @@
 int main()
 {
 	using namespace std::complex_literals;
-	std::string expr1 = "f(3.14159 / 4) + i*f(3.14159 / 3)";
-	std::string expr2 = "i*(2 + i5)^2";
-	std::string expr3 = "(((g(PI, i*f(PI/4)^2))))";
+	std::string expr1 = "f(pi / 4) + i*f(pi / 3)";
+	std::string expr2 = "i*(2 + 5i)^2";
+	std::string expr3 = "g(pi, i*f(pi/4)^2)";
 	std::string expr4 = "1+2)*(1+2*(4+5 + 3";
-	std::string expr5 = "z^2+5zz+1";
+	std::string expr5 = "z^2+z+1";
 
 	typedef std::complex<double> T;
 	//typedef double T;
@@ -24,8 +24,6 @@ int main()
 	Parser<T> R;
 	R.RecognizeToken(new SymbolFunc<T,T>(f, "f"));
 	R.RecognizeToken(new SymbolFunc<T,T,T>(g, "g"));
-	R.RecognizeToken(new SymbolVar<T>("i", T(0, 1)));
-	R.RecognizeToken(new SymbolVar<T>("PI", 3.14159));
 	R.Parse(expr3);
 	std::cout << R.Parse(expr1) << "\n" << R.Parse(expr2)
 		<< "\n" << R.Parse(expr3) << "\n" << R.Parse(expr4) << "\n";
@@ -50,7 +48,7 @@ int main()
 	}
 	auto h = [](T z1, T z2, T z3)->T { return z1*z2*z3/(z1+z2+z3); };
 	//R.RecognizeToken(new SymbolFunc<T, T, T, T>(h, "h"));
-	R.RecognizeFunction((std::function<T(T,T,T)>) h, "h");
+	R.RecognizeFunc((std::function<T(T,T,T)>) h, "h");
 	std::cout << R.Parse("h(2,4,7)") << "\n";
 	return 0;
 }

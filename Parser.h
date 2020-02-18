@@ -3,6 +3,8 @@
 
 #include <map>
 #include <sstream>
+#include <vector>
+#include <cmath>
 
 template<typename T>
 class Symbol;
@@ -14,7 +16,7 @@ class Parser
 {
 public:
 	Parser();
-
+	~Parser();
 	void RecognizeToken(Symbol<T>* sym)
 	{
 		tokens[sym->GetToken()] = sym;
@@ -25,16 +27,21 @@ public:
 		return (*itr)->eval()->getVal();
 	};
 	template<typename... Ts>
-	void RecognizeFunction(std::function<T(Ts...)> f, std::string name)
+	void RecognizeFunc(const std::function<T(Ts...)>& f,
+		const std::string& name)
 	{
 		RecognizeToken(new SymbolFunc<T, Ts...>(f, name));
 	}
-	void setVariable(std::string name, T val);
+	void setVariable(const std::string& name, const T& val);
+	std::string str() { return lastValidInput; }
 	T Parse(std::string str);
-	typename std::vector<Symbol<T>*>::iterator itr;
+	void Revert() { Parse(lastValidInput); }
 
+	typename std::vector<Symbol<T>*>::iterator itr;
 	auto GetMinItr() { return out.begin(); }
+	T operator()(T val);
 private:
+	std::string lastValidInput = "";
 	void PushToken(Symbol<T>* token)
 	{
 		token->SetParent(this);
@@ -63,10 +70,35 @@ inline Parser<T>::Parser()
 	RecognizeToken(new SymbolLParen<T>);
 	RecognizeToken(new SymbolRParen<T>);
 	RecognizeToken(new SymbolComma<T>);
+	RecognizeToken(new SymbolConst<T>("pi", acos(-1)));
+	RecognizeToken(new SymbolConst<T>("e", exp(1)));
+	RecognizeToken(new SymbolConst<T>("i", T(0,1)));
+
+	RecognizeFunc((std::function<T(T)>)[](T z) {return exp(z); }, "exp");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return log(z); }, "log");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return sqrt(z); }, "sqrt");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return sin(z); }, "sin");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return cos(z); }, "cos");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return tan(z); }, "tan");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return sinh(z); }, "sinh");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return cosh(z); }, "cosh");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return tanh(z); }, "tanh");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return asin(z); }, "asin");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return acos(z); }, "acos");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return atan(z); }, "atan");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return asinh(z); }, "asinh");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return acosh(z); }, "acosh");
+	RecognizeFunc((std::function<T(T)>)[](T z) {return atanh(z); }, "atanh");
 }
 
 template<typename T>
-inline void Parser<T>::setVariable(std::string name, T val)
+inline Parser<T>::~Parser()
+{
+	for (auto S : tokens) delete S.second;
+}
+
+template<typename T>
+inline void Parser<T>::setVariable(const std::string& name, const T& val)
 {
 	if (tokens.find(name) == tokens.end())
 	{
@@ -104,12 +136,28 @@ T Parser<T>::Parse(std::string input)
 	};
 
 	// Add white space between tokens for easier stringstream processing
-	for (auto tok : tokens)
+	size_t pos = 0;
+	std::string inputCopy = input;
+	while (pos != std::string::npos)
 	{
-		replaceAll(input, tok.first, " " + tok.first + " ");
+		pos = inputCopy.find_first_not_of(
+			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890_ ", pos);
+		if (pos != std::string::npos)
+		{
+			std::string y(1,input[pos]);
+			input.replace(pos, 1, " " + y + " ");
+			inputCopy.replace(pos, 1, "   ");
+		}
 	}
-
-	//replaceAll(input, ",", "");
+	//std::string inputCopy = input;
+	//for (auto tok : tokens)
+	//{
+	//	if (inputCopy.find(tok.first) != std::string::npos)
+	//	{
+	//		replaceAll(inputCopy, tok.first, std::string(tok.len," "));
+	//		replaceAll(input, tok.first, " " + tok.first + " ");
+	//	}
+	//}
 
 	std::string s;
 	std::stringstream strPre(input);
@@ -133,7 +181,8 @@ T Parser<T>::Parse(std::string input)
 			// Add "\\" to name to prevent issues tokenizing in the future
 			// if the parser is reused without clearing mapped tokens.
 			s = "\\" + s;
-			tokens[s] = new SymbolNum<T>(t);
+			if (tokens.find(s) == tokens.end())
+				tokens[s] = new SymbolNum<T>(t);
 			tokenVec.push_back(s);
 			if (ss >> s)
 			{
@@ -161,9 +210,7 @@ T Parser<T>::Parse(std::string input)
 		{
 			if (i > 0)
 			{
-				if ((!tokens[tokenVec[i - 1]]->IsMonad() ||
-					tokenVec[i - 1] == ",") &&
-					tokens[tokenVec[i - 1]]->IsLeftAssoc())
+				if (tokens[tokenVec[i - 1]]->IsPunctuation())
 				{
 					tokenVec[i] = "~";
 				}
@@ -200,22 +247,27 @@ T Parser<T>::Parse(std::string input)
 	// Check for errors
 	try
 	{
+		if (tokenVec.empty()) throw std::invalid_argument(
+			"Error: Empy expression.");
 		if (tokens[tokenVec[0]]->IsDyad() || tokens[tokenVec.back()]->IsDyad())
 		{
 			throw std::invalid_argument(
-				"Error: Expression begins or ends with dyad");
+				"Error: Expression begins or ends with dyad.");
 		}
-		for (auto it = tokenVec.begin() + 1; it != tokenVec.end() - 1; it++)
+		if (tokenVec.size() > 1)
 		{
-			if ((*it)[0] == '\\')
+			for (auto it = tokenVec.begin() + 1; it != tokenVec.end() - 1; it++)
 			{
-				if (tokens[*it]->IsDyad())
+				if ((*it)[0] == '\\')
 				{
-					if (tokens[*(it - 1)]->IsDyad() ||
-						tokens[*(it + 1)]->IsDyad())
+					if (tokens[*it]->IsDyad())
 					{
-						throw std::invalid_argument(
-							"Error: Two adjacent dyads");
+						if (tokens[*(it - 1)]->IsDyad() ||
+							tokens[*(it + 1)]->IsDyad())
+						{
+							throw std::invalid_argument(
+								"Error: Two adjacent dyads.");
+						}
 					}
 				}
 			}
@@ -292,6 +344,17 @@ T Parser<T>::Parse(std::string input)
 		opStack.pop_back();
 	}
 
+	T result = eval();
+	// If no exceptions have been thrown by now, the input should be valid,
+	// so store it as the last valid state.
+	lastValidInput = input;
+	return result;
+}
+
+template<typename T>
+inline T Parser<T>::operator()(T val)
+{
+	setVariable("z", val);
 	return eval();
 }
 

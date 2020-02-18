@@ -26,21 +26,29 @@ enum precedence_list
 	sym_comma = -1
 };
 
+// Base class for parsed symbols. Symbol pointers are stored in a vector, and
+// each symbol has a pointer "parent" to that vector. Symbols recursively
+// evaluate themselves, pulling their arguments from the vector. Any valid
+// calculation will return a SymbolNum<T> unique pointer.
 template<typename T>
 class Symbol
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
+	// Various flags and virtual "members" used by the parser.
 	virtual int GetPrecedence() = 0;
 	virtual std::string GetToken() = 0;
 	virtual bool IsLeftAssoc() { return true; }
 	virtual bool IsDyad() { return false; }
 	virtual bool IsMonad() { return false; }
+	virtual bool IsPunctuation() { return false; }
 
 	Symbol() {};
+	virtual ~Symbol() {};
 	Symbol(Parser<T>* par) : parent(par) {};
 
-	virtual  SymbolNum<T>* eval() { return new SymbolError<T>; }
-	virtual void SetVal(T v) {};
+	virtual SNumPtr eval() { return std::make_unique<SymbolError<T>>(); }
+	virtual void SetVal(const T& v) {};
 	void SetParent(Parser<T>* p) { parent = p; }
 
 	bool leftAssoc = true;
@@ -49,57 +57,62 @@ protected:
 	Parser<T>* parent = nullptr;
 };
 
+// All two-argument operations inherent from this
 template<typename T>
 class Dyad : public Symbol<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2) = 0;
-	virtual SymbolNum<T>* eval()
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2) = 0;
+	virtual SNumPtr eval()
 	{
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw std::invalid_argument("Error: Mismatched operations\n");
+				throw std::invalid_argument("Error: Mismatched operations.");
 		}
 		catch(std::invalid_argument)
 		{
 			throw;
 		}
-		SymbolNum<T>* s1 = (*(--this->parent->itr))->eval();
+		SNumPtr s1 = (*(--this->parent->itr))->eval();
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw std::invalid_argument("Error: Mismatched operations\n");
+				throw std::invalid_argument("Error: Mismatched operations.");
 		}
 		catch (std::invalid_argument)
 		{
 			throw;
 		}
-		SymbolNum<T>* s2 = (*(--this->parent->itr))->eval();
-		return Apply(s1, s2);
+		SNumPtr s2 = (*(--this->parent->itr))->eval();
+		return Apply(std::move(s1), std::move(s2));
 	}
 	bool IsDyad() { return true; }
 };
 
-//template<typename T, class U>
-//class SymbolFunc : public Symbol<T>
-//{
-//public:
-//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) = 0;
-//	virtual SymbolNum<T>* eval()
-//	{
-//		try
-//		{
-//			if (this->parent->itr < this->parent->GetMinItr() + 1)
-//				throw std::invalid_argument("Error: Mismatched operations\n");
-//		}
-//		catch (std::invalid_argument)
-//		{
-//			throw;
-//		}
-//		return Apply((*(--this->parent->itr))->eval());
-//	}
-//};
+// One-argument operations inherit from this
+template<typename T>
+class Monad : public Symbol<T>
+{
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+public:
+	virtual SNumPtr Apply(SNumPtr t1) = 0;
+	virtual SNumPtr eval()
+	{
+		try
+		{
+			if (this->parent->itr < this->parent->GetMinItr() + 1)
+				throw std::invalid_argument("Error: Mismatched operations.");
+		}
+		catch (std::invalid_argument)
+		{
+			throw;
+		}
+		return Apply(std::move((*(--this->parent->itr))->eval()));
+	}
+	bool IsMonad() { return true; }
+};
 
 template<int... Is>
 struct seq {};
@@ -122,19 +135,23 @@ T callByVector(std::function<T(Ts...)> f,
 	return callByVector(f, arguments, int_seq<sizeof...(Ts)>());
 }
 
+// Template class for functions of arbitrary argument count.
+// All data types must be the same, for now
 template<typename T, typename... Ts>
 class SymbolFunc : public Symbol<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	SymbolFunc() {};
-	SymbolFunc(std::function<T(Ts...)> g, std::string s) : f(g), name(s) {};
+	SymbolFunc(const std::function<T(Ts...)>& g, const std::string& s) :
+		f(g), name(s) {};
 
 	std::function <T(Ts...)> f;
-	virtual SymbolNum<T>* Apply(std::array<T, sizeof...(Ts)> args)
+	virtual SNumPtr Apply(std::array<T, sizeof...(Ts)>& args)
 	{
-		return new SymbolNum<T>(callByVector(f, args));
+		return std::make_unique<SymbolNum<T>>(callByVector(f, args));
 	}
-	virtual SymbolNum<T>* eval()
+	virtual SNumPtr eval()
 	{
 		std::array<T, sizeof...(Ts)> s;
 		for (size_t i = 0; i < sizeof...(Ts); i++)
@@ -142,7 +159,7 @@ public:
 			try
 			{
 				if (this->parent->itr < this->parent->GetMinItr() + 1)
-					throw std::invalid_argument("Error: Mismatched operations\n");
+					throw std::invalid_argument("Error: Mismatched operations.");
 			}
 			catch (std::invalid_argument)
 			{
@@ -158,27 +175,6 @@ private:
 	std::string name = "f";	
 };
 
-template<typename T>
-class Monad : public Symbol<T>
-{
-public:
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) = 0;
-	virtual SymbolNum<T>* eval()
-	{
-		try
-		{
-			if (this->parent->itr < this->parent->GetMinItr() + 1)
-				throw std::invalid_argument("Error: Mismatched operations\n");
-		}
-		catch (std::invalid_argument)
-		{
-			throw;
-		}
-		return Apply((*(--this->parent->itr))->eval());
-	}
-	bool IsMonad() { return true; }
-};
-
 // Used for parsing strings. Should never make it to the output queue
 template<typename T>
 class SymbolLParen : public Symbol<T>
@@ -186,7 +182,7 @@ class SymbolLParen : public Symbol<T>
 public:
 	virtual int GetPrecedence() { return sym_lparen; }
 	virtual std::string GetToken() { return "("; }
-	//virtual  SymbolNum<T>* Apply(Symbol<T>* t1) { return t1; }
+	virtual bool IsPunctuation() { return true; }
 };
 
 // Used for parsing strings. Should never make it to the output queue
@@ -196,44 +192,67 @@ class SymbolRParen : public Symbol<T>
 public:
 	virtual int GetPrecedence() { return sym_rparen; }
 	virtual std::string GetToken() { return ")"; }
+	virtual bool IsPunctuation() { return true; }
 };
 
 // Used for intermediate calculations and parsed numbers
 template<typename T>
 class SymbolNum : public Symbol<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	SymbolNum() : Symbol<T>() {}
-	SymbolNum(T v) : val(v) {}
+	SymbolNum(const T& v) : val(v) {}
+	SymbolNum(const SymbolNum<T>&& S) { val = S.val; }
+	SymbolNum(const SymbolNum<T>* ptr) { val = ptr->val; }
 
 	virtual int GetPrecedence() { return sym_num; }
 	virtual std::string GetToken() { return ""; }
 	virtual T getVal() { return val; }
-	virtual void SetVal(T v) { }
-	virtual  SymbolNum<T>* eval() { return this; }
+	virtual void SetVal(const T& v) { }
+	virtual SNumPtr eval() { return std::make_unique<SymbolNum<T>>(this); }
 protected:
 	T val;
 };
 
+// Number but with stored name and value can be set after parsing.
 template<typename T>
 class SymbolVar : public SymbolNum<T>
 {
 public:
-	std::string name;
 	SymbolVar(std::string s, T v) : name(s), SymbolNum<T>(v) {}
 	virtual int GetPrecedence() { return sym_num; }
 	virtual std::string GetToken() { return name; }
-	virtual void SetVal(T v) { this->val = v; }
+	virtual void SetVal(const T& v) { this->val = v; }
+private:
+	std::string name;
 };
 
+// Number with name but value can't be changed.
+template<typename T>
+class SymbolConst : public SymbolNum<T>
+{
+public:
+	SymbolConst(std::string s, T v) : name(s), SymbolNum<T>(v) {}
+	virtual int GetPrecedence() { return sym_num; }
+	virtual std::string GetToken() { return name; }
+private:
+	std::string name;
+};
+
+// Separator. Mainly exists because people expect to type it between
+// Function arguments. Also separates numbers from dyadic operations,
+// e.g. allowing a minus sign to be interpreted as a negative sign.
 template<typename T>
 class SymbolComma : public Monad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	SymbolComma() {};
 	virtual int GetPrecedence() { return sym_comma; }
 	virtual std::string GetToken() { return ","; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1) { return this->eval(); }
+	virtual bool IsPunctuation() { return true; }
+	virtual SNumPtr Apply(SNumPtr t1) { return this->eval(); }
 };
 
 template<typename T>
@@ -248,120 +267,78 @@ public:
 template<typename T>
 class SymbolAdd : public Dyad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_add; }
 	virtual std::string GetToken() { return "+"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
 	{
-		return new SymbolNum<T>(t2->getVal() + t1->getVal());
+		return std::make_unique<SymbolNum<T>>(t2->getVal() + t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolSub : public Dyad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_sub; }
 	virtual std::string GetToken() { return "-"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
 	{
-		return new SymbolNum<T>(t2->getVal() - t1->getVal());
+		return std::make_unique<SymbolNum<T>>(t2->getVal() - t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolMul : public Dyad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_mul; }
 	virtual std::string GetToken() { return "*"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
 	{
-		return new SymbolNum<T>(t2->getVal() * t1->getVal());
+		return std::make_unique<SymbolNum<T>>(t2->getVal() * t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolDiv : public Dyad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_div; }
 	virtual std::string GetToken() { return "/"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
 	{
-		return new SymbolNum<T>(t2->getVal() / t1->getVal());
+		return std::make_unique<SymbolNum<T>>(t2->getVal() / t1->getVal());
 	}
 };
 
 template<typename T>
 class SymbolPow : public Dyad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_pow; }
 	virtual bool IsLeftAssoc() { return false; }
 	virtual std::string GetToken() { return "^"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
+	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
 	{
-		return new SymbolNum<T>(pow(t2->getVal(), t1->getVal()));
+		return std::make_unique<SymbolNum<T>>(pow(t2->getVal(), t1->getVal()));
 	}
 };
 
 template<typename T>
 class SymbolNeg : public Monad<T>
 {
+	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
 public:
 	virtual int GetPrecedence() { return sym_neg; }
 	virtual std::string GetToken() { return "~"; }
-	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
+	virtual SNumPtr Apply(SNumPtr t1)
 	{
-		return new SymbolNum<T>(-t1->getVal());
+		return std::make_unique<SymbolNum<T>>(-t1->getVal());
 	}
 };
-
-//template<typename T>
-//class SymbolFunc2 : public Dyad<T> 
-//{
-//public:
-//	SymbolFunc2() {};
-//	SymbolFunc2(std::function<T(T, T)> g, std::string s) : f(g), name(s) {};
-//
-//	std::function<T(T, T)> f = [&](T, T) { return 0; };
-//	virtual int GetPrecedence() { return sym_func; }
-//	virtual std::string GetToken() { return name; }
-//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1, SymbolNum<T>* t2)
-//	{
-//		return new SymbolNum<T>(f(t2->getVal(), t1->getVal()));
-//	}
-//private:
-//	std::string name = "f";
-//};
-//
-//template<typename T>
-//class SymbolFunc1 : public Monad<T>
-//{
-//public:
-//	SymbolFunc1() {};
-//	SymbolFunc1(std::function<T(T)> g, std::string s) : f(g), name(s) {};
-//	std::function<T(T)> f = [&](T) { return 0; };
-//	virtual int GetPrecedence() { return sym_func; }
-//	virtual std::string GetToken() { return name; }
-//	virtual SymbolNum<T>* Apply(SymbolNum<T>* t1)
-//	{
-//		return new SymbolNum<T>(f(t1->getVal()));
-//	}
-//private:
-//	std::string name = "f";
-//};
-
-//#define TypedefTokens(T)      \
-//typedef Symbol<T> Num;        \
-//typedef SymbolAdd<T> Add;     \
-//typedef SymbolSub<T> Sub;     \
-//typedef SymbolMul<T> Mul;     \
-//typedef SymbolDiv<T> Div;     \
-//typedef SymbolPow<T> Pow;     \
-//typedef SymbolNeg<T> Neg;     \
-//typedef SymbolFunc2<T> Func2; \
-//typedef SymbolFunc1<T> Func1; \
-//typedef SymbolLParen<T> LPar; \
-//typedef SymbolRParen<T> RPar;
