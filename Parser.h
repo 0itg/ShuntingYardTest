@@ -24,7 +24,7 @@ public:
 	T eval()
 	{
 		itr = out.end() - 1;
-		return (*itr)->eval()->getVal();
+		return (*itr)->eval().getVal();
 	};
 	template<typename... Ts>
 	void RecognizeFunc(const std::function<T(Ts...)>& f,
@@ -141,10 +141,11 @@ T Parser<T>::Parse(std::string input)
 	while (pos != std::string::npos)
 	{
 		pos = inputCopy.find_first_not_of(
-			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890_ ", pos);
+			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890_ "
+			, pos);
 		if (pos != std::string::npos)
 		{
-			std::string y(1,input[pos]);
+			std::string y(1, input[pos]);
 			input.replace(pos, 1, " " + y + " ");
 			inputCopy.replace(pos, 1, "   ");
 		}
@@ -154,7 +155,7 @@ T Parser<T>::Parse(std::string input)
 	//{
 	//	if (inputCopy.find(tok.first) != std::string::npos)
 	//	{
-	//		replaceAll(inputCopy, tok.first, std::string(tok.len," "));
+	//		replaceAll(inputCopy, tok.first, "");
 	//		replaceAll(input, tok.first, " " + tok.first + " ");
 	//	}
 	//}

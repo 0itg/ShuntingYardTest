@@ -33,7 +33,7 @@ enum precedence_list
 template<typename T>
 class Symbol
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	// Various flags and virtual "members" used by the parser.
 	virtual int GetPrecedence() = 0;
@@ -47,13 +47,12 @@ public:
 	virtual ~Symbol() {};
 	Symbol(Parser<T>* par) : parent(par) {};
 
-	virtual SNumPtr eval() { return std::make_unique<SymbolError<T>>(); }
+	virtual SymbolNum<T> eval() { return SymbolError<T>(); }
 	virtual void SetVal(const T& v) {};
 	void SetParent(Parser<T>* p) { parent = p; }
 
 	bool leftAssoc = true;
 protected:
-	//T val = 0;
 	Parser<T>* parent = nullptr;
 };
 
@@ -61,10 +60,10 @@ protected:
 template<typename T>
 class Dyad : public Symbol<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2) = 0;
-	virtual SNumPtr eval()
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2) = 0;
+	virtual SymbolNum<T> eval()
 	{
 		try
 		{
@@ -75,7 +74,7 @@ public:
 		{
 			throw;
 		}
-		SNumPtr s1 = (*(--this->parent->itr))->eval();
+		SymbolNum<T> s1 = (*(--this->parent->itr))->eval();
 		try
 		{
 			if (this->parent->itr < this->parent->GetMinItr() + 1)
@@ -85,7 +84,7 @@ public:
 		{
 			throw;
 		}
-		SNumPtr s2 = (*(--this->parent->itr))->eval();
+		SymbolNum<T> s2 = (*(--this->parent->itr))->eval();
 		return Apply(std::move(s1), std::move(s2));
 	}
 	bool IsDyad() { return true; }
@@ -95,10 +94,10 @@ public:
 template<typename T>
 class Monad : public Symbol<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
-	virtual SNumPtr Apply(SNumPtr t1) = 0;
-	virtual SNumPtr eval()
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1) = 0;
+	virtual SymbolNum<T> eval()
 	{
 		try
 		{
@@ -114,6 +113,7 @@ public:
 	bool IsMonad() { return true; }
 };
 
+// Generates a sequence of integers for use in other templates
 template<int... Is>
 struct seq {};
 template<int N, int... Is>
@@ -121,37 +121,40 @@ struct int_seq : int_seq<N - 1, N - 1, Is...> {};
 template<int... Is>
 struct int_seq<0, Is...> : seq<Is...> {};
 
+// Helper function overload of callByArray
 template<typename T, typename... Ts, int... Is>
-T callByVector(std::function<T(Ts...)> f, std::array<T,
+T callByArray(std::function<T(Ts...)> f, std::array<T,
 	sizeof...(Ts)>& arguments, seq<Is...>)
 {
 	return f(arguments[Is]...);
 }
 
+// Calls a function with elements of an array pasted into
+// each argument slot.
 template<typename T, typename... Ts>
-T callByVector(std::function<T(Ts...)> f,
+T callByArray(std::function<T(Ts...)> f,
 	std::array<T, sizeof...(Ts)>& arguments)
 {
-	return callByVector(f, arguments, int_seq<sizeof...(Ts)>());
+	return callByArray(f, arguments, int_seq<sizeof...(Ts)>());
 }
 
 // Template class for functions of arbitrary argument count.
-// All data types must be the same, for now
+// All data types must be the same, for now.
 template<typename T, typename... Ts>
 class SymbolFunc : public Symbol<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	SymbolFunc() {};
 	SymbolFunc(const std::function<T(Ts...)>& g, const std::string& s) :
 		f(g), name(s) {};
 
 	std::function <T(Ts...)> f;
-	virtual SNumPtr Apply(std::array<T, sizeof...(Ts)>& args)
+	virtual SymbolNum<T> Apply(std::array<T, sizeof...(Ts)>& args)
 	{
-		return std::make_unique<SymbolNum<T>>(callByVector(f, args));
+		return SymbolNum<T>(callByArray(f, args));
 	}
-	virtual SNumPtr eval()
+	virtual SymbolNum<T> eval()
 	{
 		std::array<T, sizeof...(Ts)> s;
 		for (size_t i = 0; i < sizeof...(Ts); i++)
@@ -165,7 +168,7 @@ public:
 			{
 				throw;
 			}
-			s[i] = (*(--this->parent->itr))->eval()->getVal();
+			s[i] = (*(--this->parent->itr))->eval().getVal();
 		}
 		return Apply(s);
 	}
@@ -199,7 +202,7 @@ public:
 template<typename T>
 class SymbolNum : public Symbol<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	SymbolNum() : Symbol<T>() {}
 	SymbolNum(const T& v) : val(v) {}
@@ -210,7 +213,7 @@ public:
 	virtual std::string GetToken() { return ""; }
 	virtual T getVal() { return val; }
 	virtual void SetVal(const T& v) { }
-	virtual SNumPtr eval() { return std::make_unique<SymbolNum<T>>(this); }
+	virtual SymbolNum<T> eval() { return SymbolNum<T>(this); }
 protected:
 	T val;
 };
@@ -246,13 +249,13 @@ private:
 template<typename T>
 class SymbolComma : public Monad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	SymbolComma() {};
 	virtual int GetPrecedence() { return sym_comma; }
 	virtual std::string GetToken() { return ","; }
 	virtual bool IsPunctuation() { return true; }
-	virtual SNumPtr Apply(SNumPtr t1) { return this->eval(); }
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1) { return this->eval(); }
 };
 
 template<typename T>
@@ -267,78 +270,78 @@ public:
 template<typename T>
 class SymbolAdd : public Dyad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_add; }
 	virtual std::string GetToken() { return "+"; }
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2)
 	{
-		return std::make_unique<SymbolNum<T>>(t2->getVal() + t1->getVal());
+		return SymbolNum<T>(t2.getVal() + t1.getVal());
 	}
 };
 
 template<typename T>
 class SymbolSub : public Dyad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_sub; }
 	virtual std::string GetToken() { return "-"; }
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2)
 	{
-		return std::make_unique<SymbolNum<T>>(t2->getVal() - t1->getVal());
+		return SymbolNum<T>(t2.getVal() - t1.getVal());
 	}
 };
 
 template<typename T>
 class SymbolMul : public Dyad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_mul; }
 	virtual std::string GetToken() { return "*"; }
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2)
 	{
-		return std::make_unique<SymbolNum<T>>(t2->getVal() * t1->getVal());
+		return SymbolNum<T>(t2.getVal() * t1.getVal());
 	}
 };
 
 template<typename T>
 class SymbolDiv : public Dyad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_div; }
 	virtual std::string GetToken() { return "/"; }
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2)
 	{
-		return std::make_unique<SymbolNum<T>>(t2->getVal() / t1->getVal());
+		return SymbolNum<T>(t2.getVal() / t1.getVal());
 	}
 };
 
 template<typename T>
 class SymbolPow : public Dyad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_pow; }
 	virtual bool IsLeftAssoc() { return false; }
 	virtual std::string GetToken() { return "^"; }
-	virtual SNumPtr Apply(SNumPtr t1, SNumPtr t2)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1, SymbolNum<T> t2)
 	{
-		return std::make_unique<SymbolNum<T>>(pow(t2->getVal(), t1->getVal()));
+		return SymbolNum<T>(pow(t2.getVal(), t1.getVal()));
 	}
 };
 
 template<typename T>
 class SymbolNeg : public Monad<T>
 {
-	typedef std::unique_ptr<SymbolNum<T>> SNumPtr;
+	 
 public:
 	virtual int GetPrecedence() { return sym_neg; }
 	virtual std::string GetToken() { return "~"; }
-	virtual SNumPtr Apply(SNumPtr t1)
+	virtual SymbolNum<T> Apply(SymbolNum<T> t1)
 	{
-		return std::make_unique<SymbolNum<T>>(-t1->getVal());
+		return SymbolNum<T>(-t1.getVal());
 	}
 };

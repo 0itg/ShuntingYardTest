@@ -2,6 +2,7 @@
 //#include <functional>
 #include <iostream>
 #include <complex>
+#include <ctime>
 
 #include "Parser.h"
 #include "Token.h"
@@ -44,11 +45,23 @@ int main()
 	}
 	catch (std::invalid_argument msg)
 	{
-		std::cout << msg.what();
+		std::cout << msg.what() << "\n";
 	}
 	auto h = [](T z1, T z2, T z3)->T { return z1*z2*z3/(z1+z2+z3); };
 	//R.RecognizeToken(new SymbolFunc<T, T, T, T>(h, "h"));
 	R.RecognizeFunc((std::function<T(T,T,T)>) h, "h");
 	std::cout << R.Parse("h(2,4,7)") << "\n";
+	
+	std::clock_t start = std::clock();
+
+	for (int i = 0; i < 100000; i++)
+	{
+		R.eval();
+	}
+
+	double dur = (std::clock() - start) / (double) CLOCKS_PER_SEC;
+
+	std::cout << dur << "\n";
+
 	return 0;
 }
